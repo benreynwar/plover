@@ -16,10 +16,12 @@ emulate keyboard input.
 import re
 import functools
 import threading
+import time
 
 import pyHook
 from pywinauto.SendKeysCtypes import SendKeys as _SendKeys
 
+from plover.oslayer import pause
 
 # Global state used by KeyboardCapture to support multiple instances.
 
@@ -238,5 +240,19 @@ class KeyboardEmulation:
                 pass
             else:
                 combo.append(token)
-        SendKeys(''.join(combo))
+        # Send combo in pieces with Pause's in between if there were
+        # any Pause's present.
+        combo_piece = []
+        for token in combo:
+            is_pause, pause_time = pause.is_pause(token)
+            if is_pause:
+                if combo_piece:
+                    SendKeys(''.join(combo_piece))
+                    combo_piece = []
+                time.sleep(pause_time)
+            else:
+                combo_piece.append(token)
+        if combo_piece:
+            SendKeys(''.join(combo_piece))
+                    
 

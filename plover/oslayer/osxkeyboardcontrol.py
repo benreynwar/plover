@@ -34,7 +34,9 @@ import ctypes
 import ctypes.util
 import objc
 import sys
+import time
 
+from plover.oslayer import pause
 
 # This mapping only works on keyboards using the ANSI standard layout. Each
 # entry represents a sequence of keystrokes that are needed to achieve the
@@ -155,6 +157,13 @@ KEYNAME_TO_KEYCODE = collections.defaultdict(list, {
     'Touroku': [], 'Zen_Koho': [], 'Zenkaku': [], 'Zenkaku_Hankaku': [],
 })
 
+def keyname_to_keycode(keyname):
+    is_pause, pause_time = pause.is_pause(keyname)
+    if is_pause:
+        keycode = [('Pause', pause_time)]
+    else:
+        keycode = KEYNAME_TO_KEYCODE[keyname]
+    return keycode
 
 def down(seq):
     return [(x, True) for x in seq]
@@ -358,7 +367,7 @@ class KeyboardEmulation(object):
             if c in (' ', '(', ')'):
                 keystring = ''.join(current_command)
                 current_command = []
-                seq = KEYNAME_TO_KEYCODE[keystring]
+                seq = keyname_to_keycode(keystring)
                 if c == ' ':
                     # Record press and release for command's keys.
                     keycode_events.extend(down_up(seq))
@@ -376,7 +385,7 @@ class KeyboardEmulation(object):
                 current_command.append(c)
         # Record final command key.
         keystring = ''.join(current_command)
-        seq = KEYNAME_TO_KEYCODE[keystring]
+        seq = keyname_to_keycode(keystring)
         keycode_events.extend(down_up(seq))
         # Release all keys.
         # Should this be legal in the dict (lack of closing parens)?
@@ -395,12 +404,19 @@ class KeyboardEmulation(object):
         # If event_mask is not zero at the end then bad things might happen.
         event_mask = 0
         for keycode, key_down in sequence:
-            if not key_down and keycode in MODIFIER_KEYS_TO_MASKS:
-                event_mask &= ~MODIFIER_KEYS_TO_MASKS[keycode]
-            event = CGEventCreateKeyboardEvent(
-                MY_EVENT_SOURCE, keycode, key_down)
-            CGEventSetFlags(event, event_mask)
-            CGEventPost(kCGSessionEventTap, event)
-            if key_down and keycode in MODIFIER_KEYS_TO_MASKS:
-                event_mask |= MODIFIER_KEYS_TO_MASKS[keycode]
+            if pause.keycode_is_pause(keycode):
+                # The keycode is a 'fake' keycode indicating that we should
+                # sleep for a bit.
+                if key_down:
+                    pause_time = keycode[1]
+                    time.sleep(pause_time)
+            else:
+                if not key_down and keycode in MODIFIER_KEYS_TO_MASKS:
+                    event_mask &= ~MODIFIER_KEYS_TO_MASKS[keycode]
+                event = CGEventCreateKeyboardEvent(
+                    MY_EVENT_SOURCE, keycode, key_down)
+                CGEventSetFlags(event, event_mask)
+                CGEventPost(kCGSessionEventTap, event)
+                if key_down and keycode in MODIFIER_KEYS_TO_MASKS:
+                    event_mask |= MODIFIER_KEYS_TO_MASKS[keycode]
 

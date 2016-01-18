@@ -24,10 +24,13 @@ http://tronche.com/gui/x/xlib/input/keyboard-encoding.html
 
 import sys
 import threading
+import time
 
 from Xlib import X, XK, display
 from Xlib.ext import record, xtest
 from Xlib.protocol import rq, event
+
+from plover.oslayer import pause
 
 RECORD_EXTENSION_NOT_FOUND = "Xlib's RECORD extension is required, \
 but could not be found."
@@ -296,6 +299,15 @@ class KeyboardEmulation(object):
                 self._send_keycode(keycode, modifiers)
                 self.display.sync()
 
+    def keystring_to_keycode(self, keystring):
+        is_pause, pause_time = pause.is_pause(keystring)
+        if is_pause:
+            keycode = ('Pause', pause_time)
+        else:
+            keysym = XK.string_to_keysym(keystring)
+            keycode, mods = self._keysym_to_keycode_and_modifiers(keysym)
+        return keycode
+
     def send_key_combination(self, combo_string):
         """Emulate a sequence of key combinations.
 
@@ -327,8 +339,7 @@ class KeyboardEmulation(object):
         for c in combo_string:
             if c in (' ', '(', ')'):
                 keystring = ''.join(current_command)
-                keysym = XK.string_to_keysym(keystring)
-                keycode, mods = self._keysym_to_keycode_and_modifiers(keysym)
+                keycode = self.keystring_to_keycode(keystring)
                 current_command = []
                 if keycode is None:
                     continue
@@ -352,8 +363,7 @@ class KeyboardEmulation(object):
                 current_command.append(c)
         # Record final command key.
         keystring = ''.join(current_command)
-        keysym = XK.string_to_keysym(keystring)
-        keycode, mods = self._keysym_to_keycode_and_modifiers(keysym)
+        keycode = self.keystring_to_keycode(keystring)
         if keycode is not None:
             keycode_events.append((keycode, X.KeyPress))
             keycode_events.append((keycode, X.KeyRelease))
@@ -364,11 +374,18 @@ class KeyboardEmulation(object):
         # Tell all KeyboardCapture instances to ignore the key
         # events that are about to be sent.
         for capture in keyboard_capture_instances:
-            capture.ignore_key_events(keycode_events)
+           not_pause_events = [k for k in keycode_events if not pause.keycode_is_pause(k[0])]
+           capture.ignore_key_events(not_pause_events)
 
         # Emulate the key combination by sending key events.
         for keycode, event_type in keycode_events:
-            xtest.fake_input(self.display, event_type, keycode)
+            if pause.keycode_is_pause(keycode):
+                # Pause on 'Pause' keypresses.  Ignore their key release since that
+                # is meaningless.
+                if event_type == X.KeyPress:
+                    time.sleep(keycode[1])
+            else:
+                xtest.fake_input(self.display, event_type, keycode)
             self.display.sync()
 
     def _send_keycode(self, keycode, modifiers=0):
